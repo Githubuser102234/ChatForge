@@ -1,0 +1,50 @@
+{
+  "rules": {
+    // Root-level rules: require auth for most operations
+    ".read": "auth != null", 
+    ".write": "auth != null",
+
+    "admins": {
+      // Only an already existing admin may add/remove admins.
+      ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true)",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true)"
+    },
+
+    "config": {
+      // Only admins can change config. Everyone can read config (UI uses this client-side too).
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true",
+      ".validate": "newData.hasChildren(['locked','disabled']) ? (newData.child('locked').isBoolean() && newData.child('disabled').isBoolean()) : true"
+    },
+
+    "bans": {
+      // Only admins can place/remove bans. Users can read to check their own ban.
+      ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.uid === $uid)",
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+
+    "messages": {
+      ".read": "auth != null && (root.child('config').child('disabled').val() === true ? root.child('admins').child(auth.uid).val() === true : true)",
+      ".write": "auth != null && (
+          // if chat disabled -> only admins can write
+          (root.child('config').child('disabled').val() === true && root.child('admins').child(auth.uid).val() === true)
+          ||
+          // otherwise: allow authenticated non-banned users, but if locked -> only admins can write
+          (root.child('config').child('disabled').val() !== true &&
+            // check ban
+            !(root.child('bans').child(auth.uid).exists() && root.child('bans').child(auth.uid).child('expires').val() > now) &&
+            (root.child('config').child('locked').val() === true ? root.child('admins').child(auth.uid).val() === true : true)
+          )
+      )",
+      // validation for message structure
+      "$msgId": {
+        ".validate": "newData.hasChildren(['uid','userName','text','ts']) &&
+                      newData.child('uid').isString() &&
+                      newData.child('userName').isString() &&
+                      newData.child('text').isString() &&
+                      newData.child('ts').isNumber() &&
+                      newData.child('text').val().length <= 2000"
+      }
+    }
+  }
+}
