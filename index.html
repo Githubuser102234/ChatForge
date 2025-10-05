@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Real-Time Chat (Admin)</title>
+    <title>Secure Real-Time Chat (Admin & Share)</title>
     <!-- Load Tailwind CSS for styling and Inter font -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -25,6 +25,7 @@
             height: 100vh; display: flex; justify-content: center; align-items: center; background-color: #f3f4f6;
             font-family: 'Inter', sans-serif;
         }
+        .message-share-link { cursor: pointer; }
     </style>
 </head>
 <body class="antialiased">
@@ -34,6 +35,17 @@
         <div class="text-xl font-semibold text-indigo-600 animate-pulse">
             Initializing Chat System...
         </div>
+    </div>
+
+    <!-- Shareable Message View -->
+    <div id="share-view" class="chat-container bg-white rounded-xl p-8 shadow-2xl flex flex-col justify-start gap-4 hidden">
+        <h2 class="text-3xl font-extrabold text-center text-indigo-600 border-b pb-3">Shared Message</h2>
+        <div id="shared-message-content" class="flex-grow overflow-y-auto">
+            <!-- Shared message content goes here -->
+        </div>
+        <button id="close-share-view" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg transition duration-200">
+            Close and Go to Main Chat
+        </button>
     </div>
 
     <!-- Main Chat Container -->
@@ -53,16 +65,32 @@
         <!-- Admin Panel (Conditionally Visible) -->
         <div id="admin-panel" class="p-3 bg-red-100 border-b border-red-300 hidden">
             <p class="text-sm font-semibold text-red-700 mb-2">Admin Tools:</p>
-            <button id="delete-all-messages-btn" class="text-xs bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-3 rounded-lg transition duration-200">
-                Delete ALL Messages (Requires Admin Privileges)
-            </button>
+            <div class="flex flex-wrap gap-2 items-center">
+                
+                <button id="delete-all-messages-btn" class="text-xs bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-3 rounded-lg transition duration-200">
+                    Delete ALL
+                </button>
+
+                <label class="flex items-center space-x-2 text-xs text-red-700 cursor-pointer">
+                    <input type="checkbox" id="chat-disabled-toggle" class="form-checkbox h-4 w-4 text-red-600 rounded">
+                    <span>Disable Chat (Hide)</span>
+                </label>
+                
+                <label class="flex items-center space-x-2 text-xs text-red-700 cursor-pointer">
+                    <input type="checkbox" id="chat-locked-toggle" class="form-checkbox h-4 w-4 text-red-600 rounded">
+                    <span>Lock Chat (Read-Only)</span>
+                </label>
+            </div>
         </div>
 
         <!-- Messages Display Area -->
         <main id="messages-container" class="flex-grow overflow-y-auto p-4 space-y-4"></main>
 
         <!-- Footer / Input Area -->
-        <footer class="p-4 border-t border-gray-200 bg-gray-50">
+        <footer id="chat-footer" class="p-4 border-t border-gray-200 bg-gray-50">
+            <div id="chat-locked-status" class="text-center text-sm text-red-500 font-semibold mb-2 hidden">
+                Chat is currently locked. Only admins can send messages.
+            </div>
             <div id="typing-indicator" class="typing-indicator text-sm text-gray-500 mb-2 hidden">
                 <span>.</span><span>.</span><span>.</span>
                 <span class="ml-1">Someone is typing...</span>
@@ -74,13 +102,13 @@
                     placeholder="Type your message here..."
                     autocomplete="off"
                     maxlength="500"
-                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
+                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 disabled:bg-gray-100 disabled:placeholder-gray-400"
                     required
                 >
                 <button
                     type="submit"
                     id="send-button"
-                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-200"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-200 disabled:opacity-50"
                 >
                     Send
                 </button>
@@ -129,7 +157,7 @@
         </div>
     </div>
 
-    <!-- Custom Alert/Error Box (No alert() or confirm()) -->
+    <!-- Custom Alert/Error/Confirmation Box (No alert() or confirm()) -->
     <div id="custom-alert" class="fixed top-4 right-4 bg-white border border-gray-300 p-4 rounded-lg shadow-lg z-50 transition-transform duration-300 transform translate-x-full hidden">
         <p id="alert-message" class="text-sm"></p>
         <div class="flex justify-end mt-3 space-x-2 hidden" id="alert-confirm-buttons">
@@ -152,7 +180,7 @@
             projectId: "chatnow-2fff6",
             storageBucket: "chatnow-2fff6.firebasestorage.app",
             messagingSenderId: "341859624721",
-            appId: "1:341859624721:web:1bf8aa72a18bf2969dcceb0", // Corrected the trailing d-2969dcceb0 instead of 296dcceb0 from previous
+            appId: "1:341859624721:web:1bf8aa72a18bf2969dcceb0", 
             measurementId: "G-FR4Z8QEH80"
         };
 
@@ -176,7 +204,9 @@
             limitToLast,
             set,
             update,
-            remove
+            remove,
+            get,
+            child
         } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
         
         // Initialize Firebase services
@@ -185,7 +215,8 @@
         const auth = getAuth(app);
         const messagesRef = ref(db, 'messages');
         const typingRef = ref(db, 'typing');
-        const adminsRef = ref(db, 'Admins'); // Reference to the Admins list
+        const adminsRef = ref(db, 'Admins');
+        const controlsRef = ref(db, 'Controls'); // New path for admin controls
         
         // =========================================================================
         // GLOBAL STATE & DOM ELEMENTS
@@ -194,36 +225,28 @@
         const messageForm = document.getElementById('message-form');
         const messageInput = document.getElementById('message-input');
         const loadingScreen = document.getElementById('loading-screen');
-        const typingIndicator = document.getElementById('typing-indicator');
         const chatWrapper = document.getElementById('chat-wrapper');
         const authModal = document.getElementById('auth-modal');
-        const authForm = document.getElementById('auth-form');
         const displayNameDisplay = document.getElementById('display-name');
         const adminPanel = document.getElementById('admin-panel');
         const adminBadge = document.getElementById('admin-badge');
         const deleteAllMessagesBtn = document.getElementById('delete-all-messages-btn');
-        
-        // Edit Modal elements
-        const editModal = document.getElementById('edit-modal');
-        const editInput = document.getElementById('edit-input');
-        const saveEditButton = document.getElementById('save-edit-button');
-        const cancelEditButton = document.getElementById('cancel-edit-button');
-
-        // Custom Alert/Confirmation elements (replacing window.confirm/alert)
-        const customAlert = document.getElementById('custom-alert');
-        const alertMessage = document.getElementById('alert-message');
-        const alertConfirmButtons = document.getElementById('alert-confirm-buttons');
-        const alertOk = document.getElementById('alert-ok');
-        const alertCancel = document.getElementById('alert-cancel');
+        const chatDisabledToggle = document.getElementById('chat-disabled-toggle');
+        const chatLockedToggle = document.getElementById('chat-locked-toggle');
+        const chatLockedStatus = document.getElementById('chat-locked-status');
+        const chatFooter = document.getElementById('chat-footer');
+        const shareView = document.getElementById('share-view');
+        const sharedMessageContent = document.getElementById('shared-message-content');
+        const closeShareViewButton = document.getElementById('close-share-view');
         
         let currentUserId = null;
         let currentDisplayName = null;
-        let isSignUpMode = false;
-        let editingMessageKey = null; // Key of the message being edited
-        let isAdmin = false; // New state variable
+        let isAdmin = false; 
+        let isChatDisabled = false; // Global state for chat visibility
+        let isChatLocked = false;   // Global state for chat sendability
 
         // =========================================================================
-        // UTILITY FUNCTIONS (Timestamp, Color, Scroll)
+        // UTILITY FUNCTIONS & CUSTOM ALERT
         // =========================================================================
 
         const stringToColor = (str) => {
@@ -252,19 +275,33 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         };
 
-        // Custom Alert/Confirmation Box
+        const customAlertElements = {
+            customAlert: document.getElementById('custom-alert'),
+            alertMessage: document.getElementById('alert-message'),
+            alertConfirmButtons: document.getElementById('alert-confirm-buttons'),
+            alertOk: document.getElementById('alert-ok'),
+            alertCancel: document.getElementById('alert-cancel'),
+        };
+
+        const hideAlert = () => {
+            customAlertElements.customAlert.classList.add('translate-x-full');
+            setTimeout(() => {
+                customAlertElements.customAlert.classList.add('hidden');
+                customAlertElements.alertConfirmButtons.classList.add('hidden');
+            }, 300);
+        };
+
         const showConfirmation = (message, onConfirm) => {
-            alertMessage.textContent = message;
-            alertConfirmButtons.classList.remove('hidden');
-            customAlert.classList.remove('hidden');
-            customAlert.classList.remove('translate-x-full');
+            customAlertElements.alertMessage.textContent = message;
+            customAlertElements.alertConfirmButtons.classList.remove('hidden');
+            customAlertElements.customAlert.classList.remove('hidden');
+            customAlertElements.customAlert.classList.remove('translate-x-full');
             
-            // Clone and replace buttons to ensure fresh event listeners
-            const newOk = alertOk.cloneNode(true);
-            const newCancel = alertCancel.cloneNode(true);
+            const newOk = customAlertElements.alertOk.cloneNode(true);
+            const newCancel = customAlertElements.alertCancel.cloneNode(true);
             
-            alertOk.parentNode.replaceChild(newOk, alertOk);
-            alertCancel.parentNode.replaceChild(newCancel, alertCancel);
+            customAlertElements.alertOk.parentNode.replaceChild(newOk, customAlertElements.alertOk);
+            customAlertElements.alertCancel.parentNode.replaceChild(newCancel, customAlertElements.alertCancel);
             
             newOk.onclick = () => {
                 hideAlert();
@@ -272,18 +309,9 @@
             };
             newCancel.onclick = hideAlert;
         };
-
-        const hideAlert = () => {
-            customAlert.classList.add('translate-x-full');
-            setTimeout(() => {
-                customAlert.classList.add('hidden');
-                alertConfirmButtons.classList.add('hidden');
-            }, 300);
-        };
         
         const displayError = (message) => {
-            const tempAlert = document.getElementById('custom-alert-temp') || document.createElement('div');
-            tempAlert.id = 'custom-alert-temp';
+            const tempAlert = document.createElement('div');
             tempAlert.className = 'fixed top-4 right-4 bg-red-100 border border-red-400 p-3 rounded-lg shadow-lg z-50 transition-transform duration-300';
             tempAlert.textContent = message;
             document.body.appendChild(tempAlert);
@@ -295,8 +323,55 @@
         };
 
         // =========================================================================
-        // ADMIN LOGIC
+        // ADMIN AND CONTROL LOGIC
         // =========================================================================
+
+        const updateChatControls = (disabled, locked) => {
+            set(controlsRef, {
+                chatDisabled: disabled,
+                chatLocked: locked,
+                lastUpdated: serverTimestamp()
+            }).catch(e => displayError("Admin Write Error: Could not update chat controls."));
+        };
+
+        const handleChatControlUpdate = (controls) => {
+            isChatDisabled = controls?.chatDisabled === true;
+            isChatLocked = controls?.chatLocked === true;
+            
+            // Sync Admin UI Toggles (only if current user is admin)
+            if (isAdmin) {
+                chatDisabledToggle.checked = isChatDisabled;
+                chatLockedToggle.checked = isChatLocked;
+            }
+
+            // Global UI Update based on disabled/locked state
+            if (isChatDisabled && !isAdmin) {
+                chatWrapper.classList.add('hidden');
+                messagesContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">Chat is currently disabled by admin.</div>';
+            } else {
+                chatWrapper.classList.remove('hidden');
+                
+                if (isChatLocked && !isAdmin) {
+                    messageInput.disabled = true;
+                    messageInput.placeholder = "Chat is locked by admin.";
+                    document.getElementById('send-button').disabled = true;
+                    chatLockedStatus.classList.remove('hidden');
+                } else {
+                    messageInput.disabled = false;
+                    messageInput.placeholder = "Type your message here...";
+                    document.getElementById('send-button').disabled = false;
+                    chatLockedStatus.classList.add('hidden');
+                }
+            }
+        };
+
+        onValue(controlsRef, (snapshot) => {
+            handleChatControlUpdate(snapshot.val());
+        });
+
+        // Event Listeners for Admin Toggles
+        chatDisabledToggle.addEventListener('change', (e) => updateChatControls(e.target.checked, isChatLocked));
+        chatLockedToggle.addEventListener('change', (e) => updateChatControls(isChatDisabled, e.target.checked));
 
         const checkAdminStatus = (uid) => {
             if (!uid) {
@@ -304,12 +379,12 @@
                 updateAdminUI();
                 return;
             }
-            // Listen to the specific admin status for the current user
             const userAdminRef = ref(db, `Admins/${uid}`);
             onValue(userAdminRef, (snapshot) => {
-                // If the value is true, the user is an admin
                 isAdmin = snapshot.val() === true;
                 updateAdminUI();
+                // Re-evaluate chat controls based on new admin status
+                onValue(controlsRef, (controlsSnapshot) => handleChatControlUpdate(controlsSnapshot.val()), { onlyOnce: true });
             });
         };
 
@@ -325,67 +400,51 @@
 
         const deleteAllMessages = () => {
             showConfirmation("Are you sure you want to delete ALL messages? This action is irreversible.", () => {
+                if (!isAdmin) {
+                    displayError("Permission Denied: You are not an Admin.");
+                    return;
+                }
                 remove(messagesRef)
-                    .then(() => {
-                        displayError("Success: All messages deleted by Admin.");
-                    })
-                    .catch(error => {
-                        console.error("Admin Delete All Error:", error);
-                        displayError("Error: Could not delete all messages. Check database rules.");
-                    });
+                    .then(() => displayError("Success: All messages deleted by Admin."))
+                    .catch(error => displayError("Error: Could not delete all messages. Check database rules."));
             });
         };
         
         deleteAllMessagesBtn.addEventListener('click', deleteAllMessages);
 
         // =========================================================================
-        // MESSAGE ACTION HANDLERS (EDIT/DELETE)
+        // MESSAGE ACTION HANDLERS (EDIT/DELETE/SHARE)
         // =========================================================================
-
-        const handleEdit = (key, currentText) => {
-            editingMessageKey = key;
-            editInput.value = currentText;
-            editModal.classList.remove('hidden');
-        };
 
         const handleDelete = (key) => {
              showConfirmation("Are you sure you want to delete this message?", () => {
                 const messageDocRef = ref(db, `messages/${key}`);
                 remove(messageDocRef)
                     .then(() => displayError("Message deleted."))
-                    .catch(error => {
-                        console.error("Error deleting message:", error);
-                        displayError("Error deleting message. Check rules.");
-                    });
+                    .catch(error => displayError("Error deleting message. Check rules."));
             });
         };
+        
+        const handleShare = (key) => {
+            const shareUrl = `${window.location.origin}/?share&type=message&id=${key}`;
+            navigator.clipboard.writeText(shareUrl)
+                .then(() => displayError("Share link copied to clipboard!"))
+                .catch(() => {
+                    // Fallback for clipboard if it fails (like in some iframes)
+                    const tempInput = document.createElement('input');
+                    tempInput.value = shareUrl;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                    displayError("Share link copied to clipboard! (Fallback)");
+                });
+        };
 
-        saveEditButton.addEventListener('click', () => {
-            const newText = editInput.value.trim();
-            if (editingMessageKey && newText) {
-                const messageDocRef = ref(db, `messages/${editingMessageKey}`);
-                update(messageDocRef, {
-                    text: newText,
-                    edited: true,
-                    timestamp: serverTimestamp() // Update timestamp on edit
-                })
-                .then(() => {
-                    editingMessageKey = null;
-                    editModal.classList.add('hidden');
-                })
-                .catch(error => displayError("Error updating message. Check rules."));
-            }
-        });
 
-        cancelEditButton.addEventListener('click', () => {
-            editingMessageKey = null;
-            editModal.classList.add('hidden');
-        });
-
-        // Attach global listener for edit/delete buttons
+        // Attach global listener for actions
         messagesContainer.addEventListener('click', (e) => {
-            // Traverse up to find the action button
-            const target = e.target.closest('button[data-action]');
+            const target = e.target.closest('button[data-action], span[data-action]');
             if (!target) return;
 
             const action = target.dataset.action;
@@ -394,16 +453,78 @@
             if (action === 'edit') {
                 const textElement = target.closest('.message-bubble').querySelector('.message-text');
                 if (textElement) {
-                    handleEdit(key, textElement.textContent.trim());
+                    // Open edit modal (logic is unchanged from previous step)
+                    editingMessageKey = key;
+                    document.getElementById('edit-input').value = textElement.textContent.trim();
+                    document.getElementById('edit-modal').classList.remove('hidden');
                 }
             } else if (action === 'delete' || action === 'admin-delete') {
                 handleDelete(key);
+            } else if (action === 'share') {
+                handleShare(key);
             }
         });
 
         // =========================================================================
         // REALTIME DATABASE LOGIC (READING)
         // =========================================================================
+
+        const renderMessage = (key, message) => {
+            const isSelf = message.uid === currentUserId;
+            const color = stringToColor(message.uid);
+            
+            // Buttons for user-owned messages (Edit/Delete)
+            let userActionsHtml = '';
+            if (isSelf) {
+                userActionsHtml = `
+                    <div class="flex space-x-2 mt-1 opacity-0 group-hover:opacity-100 transition duration-300">
+                        <button data-action="edit" data-key="${key}" class="text-xs text-indigo-200 hover:text-white transition duration-150">Edit</button>
+                        <button data-action="delete" data-key="${key}" class="text-xs text-red-300 hover:text-red-100 transition duration-150">Delete</button>
+                    </div>
+                `;
+            }
+            
+            // Admin button to delete ANY message
+            let adminDeleteHtml = '';
+            if (isAdmin && !isSelf) {
+                 adminDeleteHtml = `
+                    <button data-action="admin-delete" data-key="${key}" class="absolute top-[-10px] right-[-10px] text-xs bg-red-600 text-white p-1 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition duration-300" title="Admin Delete">
+                        &times;
+                    </button>
+                 `;
+            }
+
+            // Share link
+            const shareLinkHtml = `
+                <span data-action="share" data-key="${key}" class="message-share-link text-xs ml-2 opacity-0 group-hover:opacity-100 transition duration-300 cursor-pointer ${isSelf ? 'text-indigo-200 hover:text-white' : 'text-gray-400 hover:text-gray-600'}" title="Copy Share Link">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline-block">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.288.677.288 1.093s-.108.77-.288 1.093m0-2.186l9.53-5.035a2.25 2.25 0 0 1 2.22 0l.163.097c.608.337.89.84.89 1.377v4.613m-12.002 0c.18.324.288.677.288 1.093s-.108.77-.288 1.093m0-2.186l-9.53-5.035a2.25 2.25 0 0 0-2.22 0l-.163.097c-.608.337-.89.84-.89 1.377v4.613m12.002 0v5.65m-12.002-5.65v5.65m2.22 0c.18.324.288.677.288 1.093s-.108.77-.288 1.093m0-2.186l-9.53 5.035a2.25 2.25 0 0 1-2.22 0l-.163-.097c-.608-.337-.89-.84-.89-1.377v-4.613m12.002 0c-.18-.324-.288-.677-.288-1.093s.108-.77.288-1.093m0 2.186l9.53-5.035a2.25 2.25 0 0 0 2.22 0l.163-.097c.608-.337.89-.84.89-1.377v-4.613m-12.002 0v-5.65" />
+                    </svg>
+                </span>
+            `;
+
+            return `
+                <div class="max-w-xs sm:max-w-md message-bubble group flex flex-col ${isSelf ? 'items-end' : 'items-start'}">
+                    <div class="relative ${isSelf ? 'bg-indigo-500 text-white' : 'bg-white border border-gray-200 text-gray-800'} p-3 rounded-xl shadow-md ${isSelf ? 'rounded-br-none' : 'rounded-bl-none'} transition duration-150 ease-in-out">
+                        ${!isSelf ? 
+                            `<p class="text-xs font-bold mb-1" style="color: ${color};">${message.displayName}</p>` 
+                            : ''
+                        }
+                        <p class="message-text text-sm break-words">${message.text}</p>
+                        <span 
+                            class="text-xs mt-1 block text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}"
+                            title="${formatTimestamp(message.timestamp, true)}"
+                        >
+                            ${formatTimestamp(message.timestamp)}
+                            ${message.edited ? '<span class="italic ml-1"> (edited)</span>' : ''}
+                            ${shareLinkHtml}
+                        </span>
+                        ${adminDeleteHtml}
+                    </div>
+                    ${userActionsHtml}
+                </div>
+            `;
+        };
 
         const setupMessageListener = () => {
             const recentMessagesQuery = query(messagesRef, limitToLast(50));
@@ -413,102 +534,93 @@
                 snapshot.forEach((childSnapshot) => {
                     const key = childSnapshot.key;
                     const message = childSnapshot.val();
-                    const isSelf = message.uid === currentUserId;
-                    const color = stringToColor(message.uid);
-                    
-                    const messageElement = document.createElement('div');
-                    messageElement.className = `flex ${isSelf ? 'justify-end' : 'justify-start'}`;
-
-                    // Buttons for user-owned messages (Edit/Delete)
-                    let userActionsHtml = '';
-                    if (isSelf) {
-                        userActionsHtml = `
-                            <div class="flex space-x-2 mt-1 opacity-0 group-hover:opacity-100 transition duration-300">
-                                <button data-action="edit" data-key="${key}" class="text-xs text-indigo-200 hover:text-white transition duration-150">Edit</button>
-                                <button data-action="delete" data-key="${key}" class="text-xs text-red-300 hover:text-red-100 transition duration-150">Delete</button>
-                            </div>
-                        `;
-                    }
-                    
-                    // Admin button to delete ANY message
-                    let adminDeleteHtml = '';
-                    if (isAdmin && !isSelf) {
-                         adminDeleteHtml = `
-                            <button data-action="admin-delete" data-key="${key}" class="absolute top-[-10px] right-[-10px] text-xs bg-red-600 text-white p-1 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition duration-300" title="Admin Delete">
-                                &times;
-                            </button>
-                         `;
-                    }
-
-
-                    messageElement.innerHTML = `
-                        <div class="max-w-xs sm:max-w-md message-bubble group flex flex-col ${isSelf ? 'items-end' : 'items-start'}">
-                            <div class="relative ${isSelf ? 'bg-indigo-500 text-white' : 'bg-white border border-gray-200 text-gray-800'} p-3 rounded-xl shadow-md ${isSelf ? 'rounded-br-none' : 'rounded-bl-none'} transition duration-150 ease-in-out">
-                                ${!isSelf ? 
-                                    `<p class="text-xs font-bold mb-1" style="color: ${color};">${message.displayName}</p>` 
-                                    : ''
-                                }
-                                <p class="message-text text-sm break-words">${message.text}</p>
-                                <span 
-                                    class="text-xs mt-1 block text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}"
-                                    title="${formatTimestamp(message.timestamp, true)}"
-                                >
-                                    ${formatTimestamp(message.timestamp)}
-                                    ${message.edited ? '<span class="italic ml-1"> (edited)</span>' : ''}
-                                </span>
-                                ${adminDeleteHtml}
-                            </div>
-                            ${userActionsHtml}
-                        </div>
-                    `;
-                    messagesContainer.appendChild(messageElement);
+                    messagesContainer.innerHTML += renderMessage(key, message);
                 });
                 scrollToBottom();
             });
         };
-
+        
         // =========================================================================
-        // MAIN APPLICATION FLOW: AUTH STATE LISTENER
+        // MESSAGE SHARING LOGIC
         // =========================================================================
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                // User is signed in
-                currentUserId = user.uid;
-                currentDisplayName = user.displayName || user.email.split('@')[0];
-                displayNameDisplay.textContent = `Hello, ${currentDisplayName}`;
-                
-                // --- ADMIN CHECK ---
-                checkAdminStatus(user.uid);
-                
-                // Show chat, hide auth
-                authModal.classList.add('hidden');
-                chatWrapper.classList.remove('hidden');
+        const loadSharedMessage = async (messageId) => {
+            loadingScreen.classList.remove('hidden');
+            chatWrapper.classList.add('hidden');
+            authModal.classList.add('hidden');
+            shareView.classList.remove('hidden');
+            sharedMessageContent.innerHTML = `<div class="text-center text-gray-500">Loading message...</div>`;
+            
+            try {
+                // Fetch the specific message
+                const snapshot = await get(child(messagesRef, messageId));
 
-                // Clear and set up chat listeners
-                messagesContainer.innerHTML = '';
-                setupMessageListener();
-
-            } else {
-                // User is signed out
-                currentUserId = null;
-                currentDisplayName = null;
-                isAdmin = false; // Reset admin status
-                updateAdminUI(); // Hide admin panel
-                
-                // Show auth, hide chat
-                chatWrapper.classList.add('hidden');
-                authModal.classList.remove('hidden');
+                if (snapshot.exists()) {
+                    const message = snapshot.val();
+                    // Render the single message
+                    sharedMessageContent.innerHTML = renderMessage(snapshot.key, message);
+                } else {
+                    sharedMessageContent.innerHTML = `<div class="text-center text-red-500 font-semibold">Message ID: ${messageId} not found.</div>`;
+                }
+            } catch (error) {
+                console.error("Error fetching shared message:", error);
+                sharedMessageContent.innerHTML = `<div class="text-center text-red-500 font-semibold">Error loading message.</div>`;
+            } finally {
                 loadingScreen.classList.add('hidden');
-                messagesContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">Please sign in to view the chat.</div>';
-
-                // Clear typing status on sign out (best effort)
-                const userTypingRef = ref(db, `typing/${currentUserId}`);
-                set(userTypingRef, null);
             }
-            loadingScreen.classList.add('hidden');
+        };
+
+        // Button to close share view and reload main app
+        closeShareViewButton.addEventListener('click', () => {
+            window.location.search = ''; // Clear URL parameters and reload to main chat view
         });
 
+        // =========================================================================
+        // INITIALIZATION AND MAIN FLOW
+        // =========================================================================
+
+        const checkUrlForSharing = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('share') && urlParams.get('type') === 'message' && urlParams.has('id')) {
+                loadSharedMessage(urlParams.get('id'));
+                return true;
+            }
+            return false;
+        };
+
+        // Only proceed with main chat initialization if not in share mode
+        if (!checkUrlForSharing()) {
+            // AUTHENTICATION LISTENER
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUserId = user.uid;
+                    currentDisplayName = user.displayName || user.email.split('@')[0];
+                    displayNameDisplay.textContent = `Hello, ${currentDisplayName}`;
+                    
+                    // Essential checks
+                    checkAdminStatus(user.uid);
+                    
+                    authModal.classList.add('hidden');
+                    shareView.classList.add('hidden');
+                    // Visibility of chatWrapper is handled by handleChatControlUpdate
+                    
+                    messagesContainer.innerHTML = '';
+                    setupMessageListener();
+
+                } else {
+                    currentUserId = null;
+                    currentDisplayName = null;
+                    isAdmin = false;
+                    updateAdminUI(); 
+                    
+                    chatWrapper.classList.add('hidden');
+                    shareView.classList.add('hidden');
+                    authModal.classList.remove('hidden');
+                    messagesContainer.innerHTML = '<div class="text-center text-gray-500 mt-10">Please sign in to view the chat.</div>';
+                }
+                loadingScreen.classList.add('hidden');
+            });
+        }
     </script>
 </body>
 </html>
