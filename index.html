@@ -163,8 +163,7 @@
     let chatLocked = false;
     let chatDisabled = false;
     let currentBan = null;
-    // FIX: Use an explicit flag for Auth state completion
-    let authStateLoaded = false; 
+    let authStateLoaded = false; // Flag to indicate Auth state is fully resolved
 
     // ------------------ Utility ------------------
     function el(tag, cls, txt) {
@@ -176,7 +175,8 @@
 
     // Function to update the chat UI based on current state (Auth + Config)
     function updateChatUI() {
-      // Don't update the UI until the initial auth check is done.
+      // FIX: Prevent UI updates until the user's authentication and ban status
+      // is fully resolved, ensuring we don't flash the overlay.
       if (!authStateLoaded) return; 
 
       // 1. Update main chat status
@@ -195,12 +195,13 @@
         banOverlayMessage.textContent = `You are banned until: ${new Date(currentBan.expires).toLocaleString()}.`;
         banOverlay.classList.remove('hidden');
       }
-      // Only show the disabled overlay if the user is not an admin
+      // Only show the disabled overlay if the user is NOT an admin/signed in
       else if (chatDisabled && (!currentUser || !isAdmin)) {
         banOverlayMessage.textContent = 'Chat is currently disabled.';
         banOverlay.classList.remove('hidden');
       }
       else {
+        // If not banned and not disabled (or is admin), hide the overlay
         banOverlay.classList.add('hidden');
       }
     }
@@ -227,7 +228,7 @@
 
     signOutBtn.addEventListener('click', async ()=>{ await signOut(auth); });
 
-    // ------------------ Auth state (The Fix is here!) ------------------
+    // ------------------ Auth state ------------------
     onAuthStateChanged(auth, async user=>{
       currentUser = user;
       isAdmin = false;
@@ -275,7 +276,7 @@
         signUpBtn.classList.remove('hidden');
       }
 
-      // 🛑 The fix: Mark the auth state as fully loaded and THEN update the UI.
+      // FIX: Mark the auth state as fully loaded and THEN update the UI.
       authStateLoaded = true;
       updateChatUI();
     });
@@ -285,7 +286,7 @@
       const cfg = snap.val() || {};
       chatLocked = !!cfg.locked;
       chatDisabled = !!cfg.disabled;
-      // Use the consolidated function to update UI. It will now wait for authStateLoaded to be true.
+      // FIX: Call updateChatUI. It will now wait for authStateLoaded to be true.
       updateChatUI();
     });
 
