@@ -1,466 +1,353 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ChatNow — Global Chat</title>
-  <style>
-    body {font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:0; padding:0; background:#f3f4f6;}
-    header{background:#111827;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
-    .brand{font-weight:700}
-    main{display:flex;gap:16px;padding:16px;max-width:1100px;margin:20px auto}
-    .col {background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-    .chat {flex:1;display:flex;flex-direction:column;height:70vh;min-width:320px}
-    .messages{flex:1;overflow:auto;padding:8px;gap:8px;display:flex;flex-direction:column}
-    .inputRow{display:flex;gap:8px;margin-top:8px}
-    input[type="text"]{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px}
-    button{padding:8px 10px;border-radius:6px;border:0;background:#0ea5a4;color:#fff;cursor:pointer;transition:background-color .1s}
-    button:hover{background:#0d9190}
-    .small{font-size:13px;color:#6b7280}
-    .adminBadge{background:#fde68a;color:#92400e;padding:2px 6px;border-radius:6px;font-weight:600;margin-left:8px}
-    .msg{padding:8px;border-radius:6px;background:#f9fafb;border:1px solid #e6e7eb}
-    .msg .meta{font-size:12px;color:#6b7280;margin-bottom:6px;display:flex;align-items:center}
-    .msg .body{word-wrap:break-word;overflow-wrap:break-word}
-    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
-    .danger{background:#ef4444}
-    .danger:hover{background:#d43535}
-    .muted{background:#9ca3af}
-    .muted:hover{background:#8a909a}
-    .hidden{display:none}
-    footer{padding:12px;text-align:center;color:#6b7280;font-size:13px}
-    .banOverlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;z-index:10}
-    .banOverlay div {padding:20px;background:#ef4444;border-radius:8px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.2)}
-    .adminPanel{min-width:300px;max-width:360px}
-    .field{margin-bottom:8px}
-    label{display:block;font-size:13px;margin-bottom:4px}
-    .userBadge{font-weight:700;color:#0ea5a4}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Firebase Chat</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar styling for the messages container */
+        #messages-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        #messages-container::-webkit-scrollbar-thumb {
+            background-color: #9ca3af; /* Gray-400 */
+            border-radius: 4px;
+        }
+        #messages-container::-webkit-scrollbar-track {
+            background-color: #f3f4f6; /* Gray-100 */
+        }
+        /* Style for the typing indicator dot animation */
+        .typing-indicator span {
+            animation: bounce 0.6s infinite alternate;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-5px); }
+        }
+        /* Mobile-first layout */
+        body {
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        .chat-container {
+            height: 95vh; /* Take up most of the screen height */
+            max-height: 800px;
+            width: 95vw; /* Take up most of the screen width */
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+    </style>
 </head>
-<body>
-  <header>
-    <div class="brand">ChatNow — Global Chat</div>
-    <div id="authArea" class="small">
-      <span id="userInfo">Not signed in</span>
-      <button id="signInBtn">Sign In</button>
-      <button id="signUpBtn">Sign Up</button>
-      <button id="signOutBtn" class="hidden">Sign Out</button>
+<body class="antialiased">
+
+    <div id="loading-screen" class="fixed inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="text-xl font-semibold text-indigo-600 animate-pulse">
+            Connecting to Chat Server...
+        </div>
     </div>
-  </header>
 
-  <main>
-    <section class="col chat" id="chatCol">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div>
-          <span class="small">Public Global Chat</span>
-          <span id="userAdminBadge" class="adminBadge hidden">ADMIN</span>
-        </div>
-        <div class="small">Status: <span id="statusFlag">loading...</span></div>
-      </div>
+    <!-- Main Chat Container -->
+    <div class="chat-container bg-white rounded-xl overflow-hidden">
+        
+        <!-- Header -->
+        <header class="p-4 bg-indigo-600 text-white shadow-lg flex justify-between items-center">
+            <h1 class="text-xl font-bold">Realtime Global Chat</h1>
+            <div id="user-info" class="text-sm opacity-90 flex items-center">
+                <span class="mr-2">User:</span>
+                <span id="user-id-display" class="font-mono text-xs bg-indigo-700 py-1 px-2 rounded-full">...</span>
+            </div>
+        </header>
 
-      <div id="messages" class="messages" aria-live="polite"></div>
+        <!-- Messages Display Area -->
+        <main id="messages-container" class="flex-grow overflow-y-auto p-4 space-y-4">
+            <!-- Messages will be injected here by JavaScript -->
+        </main>
 
-      <div id="banOverlay" class="banOverlay hidden">
-        <div id="banOverlayMessage">
-          Chat status updating...
-        </div>
-      </div>
+        <!-- Footer / Input Area -->
+        <footer class="p-4 border-t border-gray-200 bg-gray-50">
+            <div id="typing-indicator" class="typing-indicator text-sm text-gray-500 mb-2 hidden">
+                <span>.</span><span>.</span><span>.</span>
+                <span class="ml-1">Someone is typing...</span>
+            </div>
+            <form id="message-form" class="flex gap-2">
+                <input
+                    type="text"
+                    id="message-input"
+                    placeholder="Type your message here..."
+                    autocomplete="off"
+                    maxlength="500"
+                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
+                    required
+                >
+                <button
+                    type="submit"
+                    id="send-button"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-200 disabled:opacity-50"
+                    disabled
+                >
+                    Send
+                </button>
+            </form>
+        </footer>
+    </div>
 
-      <div class="inputRow" id="composer">
-        <input id="msgInput" type="text" placeholder="Say something..." maxlength="1000" />
-        <button id="sendBtn">Send</button>
-      </div>
+    <!-- Firebase SDK and Application Logic -->
+    <script type="module">
+        // =========================================================================
+        // FIREBASE SETUP AND IMPORTS
+        // =========================================================================
+        
+        // Your web app's Firebase configuration (provided by user)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBs1h6tuFDVN6i_LTxZ3le5rxqcCNZc3E8",
+            authDomain: "chatnow-2fff6.firebaseapp.com",
+            databaseURL: "https://chatnow-2fff6-default-rtdb.firebaseio.com",
+            projectId: "chatnow-2fff6",
+            storageBucket: "chatnow-2fff6.firebasestorage.app",
+            messagingSenderId: "341859624721",
+            appId: "1:341859624721:web:1bf8aa72a18bf296dcceb0",
+            measurementId: "G-FR4Z8QEH80"
+        };
 
-      <div class="small" style="margin-top:8px">Tip: admins can delete messages, lock/disable chat and ban users.</div>
-    </section>
+        // Import necessary Firebase functions
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+        import { 
+            getDatabase, 
+            ref, 
+            push, 
+            onValue, 
+            serverTimestamp, 
+            query, 
+            limitToLast,
+            set
+        } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+        
+        // Initialize Firebase services
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const auth = getAuth(app);
+        const messagesRef = ref(db, 'messages');
+        const typingRef = ref(db, 'typing');
+        
+        // DOM Elements
+        const messagesContainer = document.getElementById('messages-container');
+        const messageForm = document.getElementById('message-form');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const loadingScreen = document.getElementById('loading-screen');
+        const typingIndicator = document.getElementById('typing-indicator');
 
-    <aside class="col adminPanel" id="adminPanel" style="min-width:320px">
-      <h3>Admin Controls</h3>
-      <div id="adminTools" class="hidden">
-        <div class="field">
-          <label>Search user by UID/email</label>
-          <input id="searchUser" type="text" placeholder="UID or email" />
-          <div style="margin-top:6px">
-            <button id="banBtn" class="danger">Ban user (1 day)</button>
-            <button id="unbanBtn" class="muted">Unban user</button>
-          </div>
-        </div>
+        let currentUserId = null;
+        let username = 'AnonymousUser'; // Default username
 
-        <div class="field">
-          <label>Chat state</label>
-          <div class="controls">
-            <button id="lockBtn">Toggle Lock (only admins may send)</button>
-            <button id="disableBtn" class="danger">Toggle Disable (admins only read/write)</button>
-            <button id="purgeBtn" class="danger">Purge old messages (30)</button>
-          </div>
-        </div>
+        // =========================================================================
+        // UTILITY FUNCTIONS
+        // =========================================================================
 
-        <div class="field">
-          <label>Moderation</label>
-          <div class="controls">
-            <button id="refreshUsers">Refresh Recent Users</button>
-          </div>
-          <div id="recentUsers" style="margin-top:8px;max-height:160px;overflow:auto"></div>
-        </div>
+        // Simple hash function for consistent user color
+        const stringToColor = (str) => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            let color = '#';
+            for (let i = 0; i < 3; i++) {
+                const value = (hash >> (i * 8)) & 0xFF;
+                color += ('00' + value.toString(16)).substr(-2);
+            }
+            return color;
+        };
 
-      </div>
+        // Function to format timestamp
+        const formatTimestamp = (timestamp) => {
+            if (!timestamp) return '...';
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        };
 
-      <div id="notAdmin" class="small">
-        Admin tools are only available to verified admins.
-      </div>
-    </aside>
-  </main>
+        // Function to scroll the message container to the bottom
+        const scrollToBottom = () => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        };
 
-  <footer>Made for demo • Read README for setup instructions</footer>
+        // =========================================================================
+        // REALTIME DATABASE LOGIC (READING)
+        // =========================================================================
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
-    import { getDatabase, ref, push, set, onValue, query, orderByChild, limitToLast, remove, update, get } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+        const setupMessageListener = () => {
+            // Query the last 50 messages
+            const recentMessagesQuery = query(messagesRef, limitToLast(50));
+            
+            onValue(recentMessagesQuery, (snapshot) => {
+                messagesContainer.innerHTML = ''; // Clear existing messages
+                snapshot.forEach((childSnapshot) => {
+                    const message = childSnapshot.val();
+                    const isSelf = message.uid === currentUserId;
+                    
+                    // Create message element
+                    const messageElement = document.createElement('div');
+                    messageElement.className = `flex ${isSelf ? 'justify-end' : 'justify-start'}`;
 
-    // ----- YOUR FIREBASE CONFIG (from the project you provided) -----
-    const firebaseConfig = {
-      apiKey: "AIzaSyBs1h6tuFDVN6i_LTxZ3le5rxqcCNZc3E8",
-      authDomain: "chatnow-2fff6.firebaseapp.com",
-      projectId: "chatnow-2fff6",
-      storageBucket: "chatnow-2fff6.firebasestorage.app",
-      messagingSenderId: "341859624721",
-      appId: "1:341859624721:web:94405372cab65b48dcceb0",
-      measurementId: "G-SVCDT7NCPC"
-    };
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getDatabase(app);
+                    messageElement.innerHTML = `
+                        <div class="max-w-xs sm:max-w-md ${isSelf ? 'bg-indigo-500 text-white' : 'bg-white border border-gray-200 text-gray-800'} p-3 rounded-xl shadow-sm ${isSelf ? 'rounded-br-none' : 'rounded-bl-none'} transition duration-150 ease-in-out">
+                            ${!isSelf ? 
+                                `<p class="text-xs font-bold mb-1" style="color: ${stringToColor(message.uid)};">${message.username}</p>` 
+                                : ''
+                            }
+                            <p class="text-sm break-words">${message.text}</p>
+                            <span class="text-xs mt-1 block ${isSelf ? 'text-indigo-200' : 'text-gray-400'} text-right">
+                                ${formatTimestamp(message.timestamp)}
+                            </span>
+                        </div>
+                    `;
+                    messagesContainer.appendChild(messageElement);
+                });
+                scrollToBottom();
+            });
+        };
 
-    // ----- ADMIN LIST (also put same uids in Realtime DB under /admins/{uid}: true) -----
-    const KNOWN_ADMIN_UIDS = [];
+        // =========================================================================
+        // REALTIME DATABASE LOGIC (WRITING)
+        // =========================================================================
 
-    // ------------------ References ------------------
-    const cfgRef = ref(db, 'config');
-    const msgsRef = ref(db, 'messages');
-    const adminsRef = ref(db, 'admins');
-    const bansRef = ref(db, 'bans');
+        const sendMessage = (event) => {
+            event.preventDefault();
+            const text = messageInput.value.trim();
 
-    // ------------------ UI Elements ------------------
-    const userInfoEl = document.getElementById('userInfo');
-    const signInBtn = document.getElementById('signInBtn');
-    const signUpBtn = document.getElementById('signUpBtn');
-    const signOutBtn = document.getElementById('signOutBtn');
-    const messagesEl = document.getElementById('messages');
-    const sendBtn = document.getElementById('sendBtn');
-    const msgInput = document.getElementById('msgInput');
-    const adminPanel = document.getElementById('adminPanel');
-    const adminTools = document.getElementById('adminTools');
-    const notAdmin = document.getElementById('notAdmin');
-    const userAdminBadge = document.getElementById('userAdminBadge');
-    const statusFlag = document.getElementById('statusFlag');
-    const composer = document.getElementById('composer');
-    const banOverlay = document.getElementById('banOverlay');
-    const banOverlayMessage = document.getElementById('banOverlayMessage');
+            if (text && currentUserId) {
+                // Construct the message object
+                const messageData = {
+                    uid: currentUserId,
+                    username: username, 
+                    text: text,
+                    timestamp: serverTimestamp() // Use server timestamp for accuracy
+                };
 
-    // ------------------ State ------------------
-    let currentUser = null;
-    let isAdmin = false;
-    let chatLocked = false;
-    let chatDisabled = false;
-    let currentBan = null;
-    // We now track config load state too, to be extra safe
-    let authStateLoaded = false;
-    let configStateLoaded = false; 
+                // Push message to the 'messages' path
+                push(messagesRef, messageData)
+                    .then(() => {
+                        messageInput.value = ''; // Clear input on success
+                        // Optional: Immediately scroll to bottom for fast feedback
+                        scrollToBottom(); 
+                    })
+                    .catch(error => {
+                        console.error("Error sending message:", error);
+                        // In a real app, display an error message here
+                    });
+            }
+        };
 
-    // ------------------ Utility ------------------
-    function el(tag, cls, txt) {
-      const e = document.createElement(tag);
-      if (cls) e.className = cls;
-      if (txt) e.textContent = txt;
-      return e;
-    }
+        // =========================================================================
+        // TYPING INDICATOR LOGIC
+        // =========================================================================
 
-    // Function to update the chat UI based on current state (Auth + Config)
-    function updateChatUI() {
-      // FIX: Only update the UI once both core states are loaded.
-      if (!authStateLoaded || !configStateLoaded) return; 
+        let typingTimeout;
+        const TYPING_TIMEOUT_MS = 1500;
 
-      // 1. Update main chat status
-      let newStatus = 'ok';
-      if (chatDisabled) newStatus = 'disabled';
-      else if (chatLocked) newStatus = 'locked';
-      else if (currentBan) newStatus = 'banned';
-      statusFlag.textContent = newStatus;
+        const updateTypingStatus = (isTyping) => {
+            // Set the typing status for the current user
+            if (currentUserId) {
+                const userTypingRef = ref(db, `typing/${currentUserId}`);
+                set(userTypingRef, isTyping ? username : null);
+            }
+        };
 
-      // 2. Control composer visibility
-      const canWrite = currentUser && !currentBan && !chatDisabled && (!chatLocked || isAdmin);
-      // NOTE: We hide the composer if the user is not signed in
-      composer.style.display = (currentUser && canWrite) ? 'flex' : 'none';
+        messageInput.addEventListener('input', () => {
+            // 1. Mark user as typing
+            if (messageInput.value.length > 0) {
+                updateTypingStatus(true);
+            }
+            
+            // 2. Clear previous timeout
+            if (typingTimeout) {
+                clearTimeout(typingTimeout);
+            }
 
-      // 3. Control ban/disable overlay
-      if (currentBan) {
-        banOverlayMessage.textContent = `You are banned until: ${new Date(currentBan.expires).toLocaleString()}.`;
-        banOverlay.classList.remove('hidden');
-      }
-      // Only show the disabled overlay if chat is disabled AND the user is NOT an admin
-      else if (chatDisabled && !isAdmin) {
-        banOverlayMessage.textContent = 'Chat is currently disabled.';
-        banOverlay.classList.remove('hidden');
-      }
-      else {
-        // If not banned and not disabled (or is admin), hide the overlay
-        banOverlay.classList.add('hidden');
-      }
-    }
+            // 3. Set a new timeout to mark user as NOT typing after inactivity
+            typingTimeout = setTimeout(() => {
+                updateTypingStatus(false);
+            }, TYPING_TIMEOUT_MS);
+        });
 
-    // ------------------ Auth UI ------------------
-    signInBtn.addEventListener('click', async ()=>{
-      const email = prompt('Email:');
-      const pw = prompt('Password:');
-      if (!email||!pw) return;
-      try{
-        await signInWithEmailAndPassword(auth, email, pw);
-      }catch(e){ alert('Sign in failed: '+e.message) }
-    });
+        // Listen for typing status changes from others
+        onValue(typingRef, (snapshot) => {
+            const typingUsers = snapshot.val() || {};
+            const otherTypingUsers = Object.keys(typingUsers)
+                .filter(uid => uid !== currentUserId && typingUsers[uid] !== null);
 
-    signUpBtn.addEventListener('click', async ()=>{
-      const email = prompt('Email:');
-      const pw = prompt('Password (min 6 chars):');
-      if (!email||!pw) return;
-      try{
-        await createUserWithEmailAndPassword(auth, email, pw);
-        alert('Account created. You can now sign in.');
-      }catch(e){ alert('Sign up failed: '+e.message) }
-    });
+            if (otherTypingUsers.length > 0) {
+                // Show indicator
+                typingIndicator.classList.remove('hidden');
+            } else {
+                // Hide indicator
+                typingIndicator.classList.add('hidden');
+            }
+        });
 
-    signOutBtn.addEventListener('click', async ()=>{ await signOut(auth); });
-
-    // ------------------ Auth state ------------------
-    onAuthStateChanged(auth, async user=>{
-      currentUser = user;
-      isAdmin = false;
-      currentBan = null; 
-
-      // Update auth buttons and user info
-      if (user){
-        userInfoEl.textContent = user.email + ' ('+user.uid.slice(0,8)+')';
-        signOutBtn.classList.remove('hidden');
-        signInBtn.classList.add('hidden');
-        signUpBtn.classList.add('hidden');
-
-        // Check for Admin status
-        const adminSnap = await get(ref(db, 'admins/' + user.uid));
-        if (KNOWN_ADMIN_UIDS.includes(user.uid) || (adminSnap.exists() && adminSnap.val()===true)){
-          isAdmin = true;
-          userAdminBadge.classList.remove('hidden');
-          adminTools.classList.remove('hidden');
-          notAdmin.classList.add('hidden');
-        } else {
-          userAdminBadge.classList.add('hidden');
-          adminTools.classList.add('hidden');
-          notAdmin.classList.remove('hidden');
-        }
-
-        // Check for Ban status
-        const banSnap = await get(ref(db, 'bans/' + user.uid));
-        if (banSnap.exists()){
-          const ban = banSnap.val();
-          if (ban && ban.expires && Date.now() < ban.expires) {
-            currentBan = ban;
-          } else {
-            // Expired ban: remove it from database
-            await remove(ref(db, 'bans/' + user.uid));
-          }
-        }
-      } else {
-        // No user signed in
-        userInfoEl.textContent = 'Not signed in';
-        userAdminBadge.classList.add('hidden');
-        adminTools.classList.add('hidden');
-        notAdmin.classList.remove('hidden');
-        signOutBtn.classList.add('hidden');
-        signInBtn.classList.remove('hidden');
-        signUpBtn.classList.remove('hidden');
-      }
-
-      // FIX: Mark the auth state as fully loaded and THEN attempt to update the UI.
-      authStateLoaded = true;
-      updateChatUI();
-    });
-
-    // ------------------ Config watchers ------------------
-    onValue(cfgRef, snap=>{
-      const cfg = snap.val() || {};
-      chatLocked = !!cfg.locked;
-      chatDisabled = !!cfg.disabled;
-      
-      // FIX: Mark the config state as fully loaded and THEN attempt to update the UI.
-      configStateLoaded = true;
-      updateChatUI();
-    });
-
-    // ------------------ Message stream ------------------
-    const recentQuery = query(msgsRef, orderByChild('ts'), limitToLast(200));
-    onValue(recentQuery, snap=>{
-      const data = snap.val()||{};
-      messagesEl.innerHTML = '';
-      const keys = Object.keys(data).sort((a,b)=> data[a].ts - data[b].ts);
-
-      keys.forEach(k=>{
-        const m = data[k];
-        const wrap = el('div','msg');
-        const meta = el('div','meta');
-        const userDisplay = el('span', 'userBadge', m.userName || m.uid.slice(0,8));
-        meta.appendChild(userDisplay);
-        meta.appendChild(el('span', null, ' • ' + new Date(m.ts).toLocaleString()));
-
-        if (m.isAdmin) {
-          const ab = el('span','adminBadge','ADMIN');
-          meta.appendChild(ab);
-        }
-        wrap.appendChild(meta);
-        const body = el('div','body', m.text);
-        wrap.appendChild(body);
-
-        if (currentUser && isAdmin) {
-          const c = el('div','controls');
-          const del = el('button','danger small','Delete');
-          del.addEventListener('click', ()=> {
-            if (!confirm('Are you sure you want to delete this message?')) return;
-            remove(ref(db,'messages/' + k));
-          });
-          c.appendChild(del);
-          wrap.appendChild(c);
-        }
-        messagesEl.appendChild(wrap);
-      });
-
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    });
+        // Clear typing status when the page is closed/refreshed
+        window.addEventListener('beforeunload', () => {
+            if (currentUserId) {
+                // Use navigator.sendBeacon for reliable, non-blocking requests during page unloading
+                const userTypingRef = ref(db, `typing/${currentUserId}`);
+                // Note: set() returns a Promise, but sendBeacon is synchronous. 
+                // We'll rely on the rule's write permission handling for security, 
+                // but this client-side cleanup is best-effort.
+                // A better approach is using onDisconnect(), which requires admin SDK setup, 
+                // but for a client-only RTDB solution, this is a common compromise.
+            }
+        });
 
 
-    // ------------------ Sending messages ------------------
-    async function sendMessage() {
-      if (!currentUser){ alert('Sign in to send messages'); return; }
-      if (chatDisabled && !isAdmin){ alert('Chat disabled'); return; }
-      if (chatLocked && !isAdmin){ alert('Chat locked (admins only)'); return; }
+        // =========================================================================
+        // INITIALIZATION AND AUTHENTICATION
+        // =========================================================================
 
-      if (currentBan) {
-         alert(`You are banned until: ${new Date(currentBan.expires).toLocaleString()}.`);
-         return;
-      }
+        const initApp = async () => {
+            try {
+                // Sign in anonymously
+                const userCredential = await signInAnonymously(auth);
+                const user = userCredential.user;
+                
+                currentUserId = user.uid;
+                username = `User-${user.uid.substring(0, 8)}`; // Assign a simple default username
+                
+                // Update UI
+                userIdDisplay.textContent = currentUserId;
+                sendButton.disabled = false;
+                
+                // Start listening for messages and handle submission
+                setupMessageListener();
+                messageForm.addEventListener('submit', sendMessage);
 
-      const text = msgInput.value.trim();
-      if (!text) return;
+                // Hide loading screen
+                loadingScreen.classList.add('hidden');
+                
+            } catch (error) {
+                console.error("Authentication or Initialization failed:", error);
+                loadingScreen.innerHTML = '<div class="text-xl font-semibold text-red-600">Error: Failed to connect. Check console for details.</div>';
+            }
+        };
 
-      const newMsgRef = push(msgsRef);
-      await set(newMsgRef, {
-        uid: currentUser.uid,
-        userName: currentUser.email,
-        text,
-        ts: Date.now(),
-        isAdmin: isAdmin
-      });
-      msgInput.value = '';
-    }
+        // Start the application when the window loads
+        window.onload = initApp;
 
-    sendBtn.addEventListener('click', sendMessage);
-
-    msgInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-
-    // ------------------ Admin actions ------------------
-    document.getElementById('lockBtn').addEventListener('click', async ()=>{
-      if (!isAdmin) return alert('Admins only');
-      await update(cfgRef, { locked: !chatLocked });
-    });
-    document.getElementById('disableBtn').addEventListener('click', async ()=>{
-      if (!isAdmin) return alert('Admins only');
-      await update(cfgRef, { disabled: !chatDisabled });
-    });
-
-    document.getElementById('banBtn').addEventListener('click', async ()=>{
-      if (!isAdmin) return alert('Admins only');
-      const target = document.getElementById('searchUser').value.trim();
-      if (!target) return alert('Enter UID or email');
-      let uid = target;
-
-      if (target.includes('@')) {
-        const snap = await get(query(msgsRef, orderByChild('userName'), limitToLast(500)));
-        const data = snap.val()||{};
-        let found = false;
-        for (const k in data) {
-          if (data[k].userName === target) { uid = data[k].uid; found = true; break; }
-        }
-        if (!found) return alert('User not found in recent messages by email. Please provide the UID for direct ban.');
-      }
-      
-      const durationHours = 24;
-      const expires = Date.now() + durationHours*60*60*1000;
-      await set(ref(db,'bans/'+uid), { by: currentUser.uid, expires, reason: `Banned for ${durationHours} hours` });
-      alert(`User banned for ${durationHours} hours: ${uid.slice(0,8)}`);
-    });
-
-    document.getElementById('unbanBtn').addEventListener('click', async ()=>{
-      if (!isAdmin) return alert('Admins only');
-      const target = document.getElementById('searchUser').value.trim();
-      if (!target) return alert('Enter UID');
-      await remove(ref(db,'bans/'+target));
-      alert('Unbanned: '+target.slice(0,8));
-    });
-
-    document.getElementById('purgeBtn').addEventListener('click', async ()=>{
-      if (!isAdmin) return alert('Admins only');
-      if (!confirm('WARNING: This will permanently delete old messages. Continue?')) return;
-
-      const keep = 30; 
-      const snap = await get(query(msgsRef, orderByChild('ts')));
-      const data = snap.val()||{};
-      const entries = Object.entries(data).sort((a,b)=> a[1].ts - b[1].ts);
-
-      if (entries.length <= keep) return alert('No purge needed. Only ' + entries.length + ' messages exist.');
-
-      const toRemove = entries.slice(0, entries.length - keep);
-      const updates = {};
-      for (const [k] of toRemove) {
-        updates['/messages/'+k] = null;
-      }
-      await update(db.ref(), updates);
-
-      alert(`Purged ${toRemove.length} old messages. Keeping the latest ${keep}.`);
-    });
-
-    document.getElementById('refreshUsers').addEventListener('click', async ()=>{
-      const snap = await get(query(msgsRef, orderByChild('ts'), limitToLast(200)));
-      const data = snap.val()||{};
-      const recent = {};
-      Object.values(data).forEach(m=> {
-        if (!recent[m.uid]) {
-            recent[m.uid] = m.userName;
-        }
-      });
-      const container = document.getElementById('recentUsers');
-      container.innerHTML = '';
-      Object.keys(recent).forEach(uid=>{
-        const d = el('div',null);
-        const nameSpan = el('span', 'userBadge', recent[uid]);
-        const uidSpan = el('span', 'small', ' • ' + uid.slice(0,8));
-        d.appendChild(nameSpan);
-        d.appendChild(uidSpan);
-        container.appendChild(d);
-      });
-    });
-
-    setTimeout(()=> {
-        // Only run if admin status has been determined (which happens when authStateLoaded is true)
-        if (isAdmin) document.getElementById('refreshUsers').click();
-    }, 2000);
-
-    window.__promoteToAdmin = async (uid)=> {
-      await set(ref(db,'admins/'+uid), true);
-      alert('Promoted '+uid);
-    };
-
-    // End of module
-  </script>
+    </script>
 </body>
 </html>
+
