@@ -11,7 +11,6 @@
     main{display:flex;gap:16px;padding:16px;max-width:1100px;margin:20px auto}
     .col {background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
     .chat {flex:1;display:flex;flex-direction:column;height:70vh;min-width:320px}
-    /* Fixed: use column instead of column-reverse for message order for better scroll anchoring */
     .messages{flex:1;overflow:auto;padding:8px;gap:8px;display:flex;flex-direction:column}
     .inputRow{display:flex;gap:8px;margin-top:8px}
     input[type="text"]{flex:1;padding:8px;border:1px solid #ddd;border-radius:6px}
@@ -21,7 +20,7 @@
     .adminBadge{background:#fde68a;color:#92400e;padding:2px 6px;border-radius:6px;font-weight:600;margin-left:8px}
     .msg{padding:8px;border-radius:6px;background:#f9fafb;border:1px solid #e6e7eb}
     .msg .meta{font-size:12px;color:#6b7280;margin-bottom:6px;display:flex;align-items:center}
-    .msg .body{word-wrap:break-word;overflow-wrap:break-word} /* Added for long messages */
+    .msg .body{word-wrap:break-word;overflow-wrap:break-word}
     .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
     .danger{background:#ef4444}
     .danger:hover{background:#d43535}
@@ -29,13 +28,12 @@
     .muted:hover{background:#8a909a}
     .hidden{display:none}
     footer{padding:12px;text-align:center;color:#6b7280;font-size:13px}
-    .banOverlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;z-index:10} /* Added z-index */
+    .banOverlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;z-index:10}
+    .banOverlay div {padding:20px;background:#ef4444;border-radius:8px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.2)}
     .adminPanel{min-width:300px;max-width:360px}
     .field{margin-bottom:8px}
     label{display:block;font-size:13px;margin-bottom:4px}
     .userBadge{font-weight:700;color:#0ea5a4}
-    /* Added style for the ban overlay message */
-    .banOverlay div {padding:20px;background:#ef4444;border-radius:8px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.2)}
   </style>
 </head>
 <body>
@@ -153,7 +151,7 @@
     const adminPanel = document.getElementById('adminPanel');
     const adminTools = document.getElementById('adminTools');
     const notAdmin = document.getElementById('notAdmin');
-    const userAdminBadge = document.getElementById('userAdminBadge'); // Renamed from adminBadge to avoid confusion
+    const userAdminBadge = document.getElementById('userAdminBadge');
     const statusFlag = document.getElementById('statusFlag');
     const composer = document.getElementById('composer');
     const banOverlay = document.getElementById('banOverlay');
@@ -164,8 +162,9 @@
     let isAdmin = false;
     let chatLocked = false;
     let chatDisabled = false;
-    let currentBan = null; // Stored ban object
-    let chatReady = false; // Simple flag to ensure everything is loaded
+    let currentBan = null;
+    // FIX: Use an explicit flag for Auth state completion
+    let authStateLoaded = false; 
 
     // ------------------ Utility ------------------
     function el(tag, cls, txt) {
@@ -177,6 +176,9 @@
 
     // Function to update the chat UI based on current state (Auth + Config)
     function updateChatUI() {
+      // Don't update the UI until the initial auth check is done.
+      if (!authStateLoaded) return; 
+
       // 1. Update main chat status
       let newStatus = 'ok';
       if (chatDisabled) newStatus = 'disabled';
@@ -193,6 +195,7 @@
         banOverlayMessage.textContent = `You are banned until: ${new Date(currentBan.expires).toLocaleString()}.`;
         banOverlay.classList.remove('hidden');
       }
+      // Only show the disabled overlay if the user is not an admin
       else if (chatDisabled && (!currentUser || !isAdmin)) {
         banOverlayMessage.textContent = 'Chat is currently disabled.';
         banOverlay.classList.remove('hidden');
@@ -204,7 +207,6 @@
 
     // ------------------ Auth UI ------------------
     signInBtn.addEventListener('click', async ()=>{
-      // Use a custom modal or better prompt/input if this was a production app
       const email = prompt('Email:');
       const pw = prompt('Password:');
       if (!email||!pw) return;
@@ -225,11 +227,11 @@
 
     signOutBtn.addEventListener('click', async ()=>{ await signOut(auth); });
 
-    // ------------------ Auth state ------------------
+    // ------------------ Auth state (The Fix is here!) ------------------
     onAuthStateChanged(auth, async user=>{
       currentUser = user;
       isAdmin = false;
-      currentBan = null; // Reset ban state on auth change
+      currentBan = null; 
 
       // Update auth buttons and user info
       if (user){
@@ -256,7 +258,7 @@
         if (banSnap.exists()){
           const ban = banSnap.val();
           if (ban && ban.expires && Date.now() < ban.expires) {
-            currentBan = ban; // User is currently banned
+            currentBan = ban;
           } else {
             // Expired ban: remove it from database
             await remove(ref(db, 'bans/' + user.uid));
@@ -273,9 +275,9 @@
         signUpBtn.classList.remove('hidden');
       }
 
-      // Important: Update the UI after all async state checks are complete
+      // 🛑 The fix: Mark the auth state as fully loaded and THEN update the UI.
+      authStateLoaded = true;
       updateChatUI();
-      chatReady = true;
     });
 
     // ------------------ Config watchers ------------------
@@ -283,44 +285,33 @@
       const cfg = snap.val() || {};
       chatLocked = !!cfg.locked;
       chatDisabled = !!cfg.disabled;
-      // Use the consolidated function to update UI
-      if (chatReady) updateChatUI();
+      // Use the consolidated function to update UI. It will now wait for authStateLoaded to be true.
+      updateChatUI();
     });
 
     // ------------------ Message stream ------------------
-    // Using simple limitToLast(200) for a basic global chat
     const recentQuery = query(msgsRef, orderByChild('ts'), limitToLast(200));
     onValue(recentQuery, snap=>{
       const data = snap.val()||{};
       messagesEl.innerHTML = '';
-      // We sort ascending by timestamp and display them in a standard flow (oldest top, newest bottom)
-      // The CSS was updated to remove `flex-direction: column-reverse`
       const keys = Object.keys(data).sort((a,b)=> data[a].ts - data[b].ts);
 
       keys.forEach(k=>{
         const m = data[k];
         const wrap = el('div','msg');
-
-        // Meta (User name/email and timestamp)
         const meta = el('div','meta');
-
-        // Display user email as the 'user name' and add userBadge class for styling
         const userDisplay = el('span', 'userBadge', m.userName || m.uid.slice(0,8));
         meta.appendChild(userDisplay);
         meta.appendChild(el('span', null, ' • ' + new Date(m.ts).toLocaleString()));
 
-        // Display admin badge next to the user name if they're an admin
         if (m.isAdmin) {
           const ab = el('span','adminBadge','ADMIN');
           meta.appendChild(ab);
         }
         wrap.appendChild(meta);
-
-        // Message body
         const body = el('div','body', m.text);
         wrap.appendChild(body);
 
-        // Admin controls (Delete button)
         if (currentUser && isAdmin) {
           const c = el('div','controls');
           const del = el('button','danger small','Delete');
@@ -334,7 +325,6 @@
         messagesEl.appendChild(wrap);
       });
 
-      // Scroll to bottom only if the user hasn't scrolled up to read history
       messagesEl.scrollTop = messagesEl.scrollHeight;
     });
 
@@ -345,7 +335,6 @@
       if (chatDisabled && !isAdmin){ alert('Chat disabled'); return; }
       if (chatLocked && !isAdmin){ alert('Chat locked (admins only)'); return; }
 
-      // Re-check ban status on message attempt for immediate feedback
       if (currentBan) {
          alert(`You are banned until: ${new Date(currentBan.expires).toLocaleString()}.`);
          return;
@@ -357,7 +346,6 @@
       const newMsgRef = push(msgsRef);
       await set(newMsgRef, {
         uid: currentUser.uid,
-        // Using email as the 'userName' for display, which is a common pattern for simple chats
         userName: currentUser.email,
         text,
         ts: Date.now(),
@@ -368,7 +356,6 @@
 
     sendBtn.addEventListener('click', sendMessage);
 
-    // Added: Allow sending message with the Enter key
     msgInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -386,19 +373,13 @@
       await update(cfgRef, { disabled: !chatDisabled });
     });
 
-    // Ban/unban via search
     document.getElementById('banBtn').addEventListener('click', async ()=>{
       if (!isAdmin) return alert('Admins only');
       const target = document.getElementById('searchUser').value.trim();
       if (!target) return alert('Enter UID or email');
       let uid = target;
 
-      if (!target.includes('@')) {
-         // Assume target is already a UID if it doesn't look like an email
-         uid = target;
-      } else {
-        // Attempt to find user by email in messages (Note: this is an IN-SECURE way to map email to UID.
-        // A proper system would use a dedicated user collection in the database.)
+      if (target.includes('@')) {
         const snap = await get(query(msgsRef, orderByChild('userName'), limitToLast(500)));
         const data = snap.val()||{};
         let found = false;
@@ -408,7 +389,6 @@
         if (!found) return alert('User not found in recent messages by email. Please provide the UID for direct ban.');
       }
       
-      // Add ban for 1 day (86400000 milliseconds)
       const durationHours = 24;
       const expires = Date.now() + durationHours*60*60*1000;
       await set(ref(db,'bans/'+uid), { by: currentUser.uid, expires, reason: `Banned for ${durationHours} hours` });
@@ -427,44 +407,36 @@
       if (!isAdmin) return alert('Admins only');
       if (!confirm('WARNING: This will permanently delete old messages. Continue?')) return;
 
-      const keep = 30; // The number of newest messages to keep
-      // Order by timestamp ascending to get the oldest messages first
+      const keep = 30; 
       const snap = await get(query(msgsRef, orderByChild('ts')));
       const data = snap.val()||{};
       const entries = Object.entries(data).sort((a,b)=> a[1].ts - b[1].ts);
 
       if (entries.length <= keep) return alert('No purge needed. Only ' + entries.length + ' messages exist.');
 
-      // Slice off the oldest messages to be removed
       const toRemove = entries.slice(0, entries.length - keep);
       const updates = {};
       for (const [k] of toRemove) {
-        // Prepare a batch delete operation (setting value to null)
         updates['/messages/'+k] = null;
       }
-      // Use update at the root to execute all deletions in one go for efficiency
       await update(db.ref(), updates);
 
       alert(`Purged ${toRemove.length} old messages. Keeping the latest ${keep}.`);
     });
 
-
-    // simple recent user list
     document.getElementById('refreshUsers').addEventListener('click', async ()=>{
       const snap = await get(query(msgsRef, orderByChild('ts'), limitToLast(200)));
       const data = snap.val()||{};
       const recent = {};
-      // Collect unique UID and corresponding userName (email) from recent messages
       Object.values(data).forEach(m=> {
         if (!recent[m.uid]) {
-            recent[m.uid] = m.userName; // Use the first userName we find for this UID
+            recent[m.uid] = m.userName;
         }
       });
       const container = document.getElementById('recentUsers');
       container.innerHTML = '';
       Object.keys(recent).forEach(uid=>{
         const d = el('div',null);
-        // Display email (or 'UID-only' if no email was stored, though the current logic sends email)
         const nameSpan = el('span', 'userBadge', recent[uid]);
         const uidSpan = el('span', 'small', ' • ' + uid.slice(0,8));
         d.appendChild(nameSpan);
@@ -473,13 +445,10 @@
       });
     });
 
-    // initial refresh
-    // Wait a bit to ensure admin status is determined before running the refresh
     setTimeout(()=> {
         if (isAdmin) document.getElementById('refreshUsers').click();
     }, 2000);
 
-    // Expose a method to let site owner quickly add admin UID to DB from console:
     window.__promoteToAdmin = async (uid)=> {
       await set(ref(db,'admins/'+uid), true);
       alert('Promoted '+uid);
