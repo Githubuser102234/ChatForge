@@ -54,14 +54,14 @@
           <span class="small">Public Global Chat</span>
           <span id="userAdminBadge" class="adminBadge hidden">ADMIN</span>
         </div>
-        <div class="small">Status: <span id="statusFlag">ok</span></div>
+        <div class="small">Status: <span id="statusFlag">loading...</span></div>
       </div>
 
       <div id="messages" class="messages" aria-live="polite"></div>
 
       <div id="banOverlay" class="banOverlay hidden">
         <div id="banOverlayMessage">
-          Function not allowed. Please try again later.
+          Chat status updating...
         </div>
       </div>
 
@@ -163,7 +163,9 @@
     let chatLocked = false;
     let chatDisabled = false;
     let currentBan = null;
-    let authStateLoaded = false; // Flag to indicate Auth state is fully resolved
+    // We now track config load state too, to be extra safe
+    let authStateLoaded = false;
+    let configStateLoaded = false; 
 
     // ------------------ Utility ------------------
     function el(tag, cls, txt) {
@@ -175,9 +177,8 @@
 
     // Function to update the chat UI based on current state (Auth + Config)
     function updateChatUI() {
-      // FIX: Prevent UI updates until the user's authentication and ban status
-      // is fully resolved, ensuring we don't flash the overlay.
-      if (!authStateLoaded) return; 
+      // FIX: Only update the UI once both core states are loaded.
+      if (!authStateLoaded || !configStateLoaded) return; 
 
       // 1. Update main chat status
       let newStatus = 'ok';
@@ -188,15 +189,16 @@
 
       // 2. Control composer visibility
       const canWrite = currentUser && !currentBan && !chatDisabled && (!chatLocked || isAdmin);
-      composer.style.display = canWrite ? 'flex' : 'none';
+      // NOTE: We hide the composer if the user is not signed in
+      composer.style.display = (currentUser && canWrite) ? 'flex' : 'none';
 
       // 3. Control ban/disable overlay
       if (currentBan) {
         banOverlayMessage.textContent = `You are banned until: ${new Date(currentBan.expires).toLocaleString()}.`;
         banOverlay.classList.remove('hidden');
       }
-      // Only show the disabled overlay if the user is NOT an admin/signed in
-      else if (chatDisabled && (!currentUser || !isAdmin)) {
+      // Only show the disabled overlay if chat is disabled AND the user is NOT an admin
+      else if (chatDisabled && !isAdmin) {
         banOverlayMessage.textContent = 'Chat is currently disabled.';
         banOverlay.classList.remove('hidden');
       }
@@ -276,7 +278,7 @@
         signUpBtn.classList.remove('hidden');
       }
 
-      // FIX: Mark the auth state as fully loaded and THEN update the UI.
+      // FIX: Mark the auth state as fully loaded and THEN attempt to update the UI.
       authStateLoaded = true;
       updateChatUI();
     });
@@ -286,7 +288,9 @@
       const cfg = snap.val() || {};
       chatLocked = !!cfg.locked;
       chatDisabled = !!cfg.disabled;
-      // FIX: Call updateChatUI. It will now wait for authStateLoaded to be true.
+      
+      // FIX: Mark the config state as fully loaded and THEN attempt to update the UI.
+      configStateLoaded = true;
       updateChatUI();
     });
 
@@ -447,6 +451,7 @@
     });
 
     setTimeout(()=> {
+        // Only run if admin status has been determined (which happens when authStateLoaded is true)
         if (isAdmin) document.getElementById('refreshUsers').click();
     }, 2000);
 
