@@ -216,7 +216,7 @@
         const messagesRef = ref(db, 'messages');
         const typingRef = ref(db, 'typing');
         const adminsRef = ref(db, 'Admins');
-        const controlsRef = ref(db, 'Controls'); // New path for admin controls
+        const controlsRef = ref(db, 'Controls'); // Path for admin controls
         
         // =========================================================================
         // GLOBAL STATE & DOM ELEMENTS
@@ -225,6 +225,7 @@
         const messageForm = document.getElementById('message-form');
         const messageInput = document.getElementById('message-input');
         const loadingScreen = document.getElementById('loading-screen');
+        const typingIndicator = document.getElementById('typing-indicator');
         const chatWrapper = document.getElementById('chat-wrapper');
         const authModal = document.getElementById('auth-modal');
         const displayNameDisplay = document.getElementById('display-name');
@@ -239,11 +240,19 @@
         const sharedMessageContent = document.getElementById('shared-message-content');
         const closeShareViewButton = document.getElementById('close-share-view');
         
+        // Edit Modal elements
+        const editModal = document.getElementById('edit-modal');
+        const editInput = document.getElementById('edit-input');
+        const saveEditButton = document.getElementById('save-edit-button');
+        const cancelEditButton = document.getElementById('cancel-edit-button');
+
+        
         let currentUserId = null;
         let currentDisplayName = null;
         let isAdmin = false; 
-        let isChatDisabled = false; // Global state for chat visibility
-        let isChatLocked = false;   // Global state for chat sendability
+        let isChatDisabled = false; 
+        let isChatLocked = false; 
+        let editingMessageKey = null; 
 
         // =========================================================================
         // UTILITY FUNCTIONS & CUSTOM ALERT
@@ -351,15 +360,19 @@
             } else {
                 chatWrapper.classList.remove('hidden');
                 
+                const sendButton = document.getElementById('send-button');
+                
                 if (isChatLocked && !isAdmin) {
                     messageInput.disabled = true;
-                    messageInput.placeholder = "Chat is locked by admin.";
-                    document.getElementById('send-button').disabled = true;
+                    messageInput.placeholder = "Chat is locked by admin (Read Only).";
+                    sendButton.disabled = true;
+                    sendButton.classList.add('disabled:opacity-50');
                     chatLockedStatus.classList.remove('hidden');
                 } else {
                     messageInput.disabled = false;
                     messageInput.placeholder = "Type your message here...";
-                    document.getElementById('send-button').disabled = false;
+                    sendButton.disabled = false;
+                    sendButton.classList.remove('disabled:opacity-50');
                     chatLockedStatus.classList.add('hidden');
                 }
             }
@@ -413,6 +426,104 @@
         deleteAllMessagesBtn.addEventListener('click', deleteAllMessages);
 
         // =========================================================================
+        // MESSAGE SENDING LOGIC (THE FIX)
+        // =========================================================================
+        
+        const sendMessage = (text) => {
+            // Check if chat is locked and the user is not an admin
+            if (isChatLocked && !isAdmin) {
+                displayError("Chat is currently locked by an admin. You cannot send messages.");
+                return;
+            }
+
+            const newMessage = {
+                uid: currentUserId,
+                displayName: currentDisplayName,
+                text: text,
+                timestamp: serverTimestamp(),
+                edited: false
+            };
+
+            push(messagesRef, newMessage)
+                .then(() => {
+                    messageInput.value = ''; // Clear input on success
+                    // Also clear typing indicator
+                    const userTypingRef = ref(db, `typing/${currentUserId}`);
+                    set(userTypingRef, null);
+                })
+                .catch(error => {
+                    console.error("Error sending message:", error);
+                    displayError("Error sending message. Check security rules or connection.");
+                });
+        };
+
+        // Set up the message sending functionality
+        messageForm.addEventListener('submit', (e) => {
+            e.preventDefault(); // <-- THE CRITICAL FIX: Stops the page refresh
+
+            const text = messageInput.value.trim();
+            if (text) {
+                sendMessage(text);
+            }
+        });
+
+        // =========================================================================
+        // TYPING INDICATOR LOGIC
+        // =========================================================================
+
+        let typingTimeout = null;
+        
+        const setTypingStatus = (isTyping) => {
+            if (!currentUserId) return;
+            const userTypingRef = ref(db, `typing/${currentUserId}`);
+            // Use currentDisplayName (with UID fallback for safety) for the value
+            set(userTypingRef, isTyping ? currentDisplayName : null);
+        };
+        
+        // Input listener for typing status
+        messageInput.addEventListener('input', () => {
+            // Only update typing status if the user is allowed to chat
+            if (isChatLocked && !isAdmin) return;
+
+            if (typingTimeout) clearTimeout(typingTimeout);
+            
+            if (messageInput.value.length > 0) {
+                setTypingStatus(true);
+                
+                // Clear typing status after a brief delay
+                typingTimeout = setTimeout(() => {
+                    setTypingStatus(false);
+                }, 3000);
+            } else {
+                 setTypingStatus(false);
+            }
+        });
+        
+        // Global listener for other users' typing status
+        onValue(typingRef, (snapshot) => {
+            const typingUsers = snapshot.val();
+            let typists = [];
+            
+            for (const uid in typingUsers) {
+                // Ignore the current user and null entries
+                if (uid !== currentUserId && typingUsers[uid]) {
+                    typists.push(typingUsers[uid]);
+                }
+            }
+
+            const typingIndicatorElement = document.getElementById('typing-indicator');
+            if (typists.length > 0) {
+                const names = typists.slice(0, 2).join(', ');
+                const additional = typists.length > 2 ? ` and ${typists.length - 2} others` : '';
+                
+                document.querySelector('#typing-indicator span:nth-child(4)').textContent = `${names}${additional} is typing...`;
+                typingIndicatorElement.classList.remove('hidden');
+            } else {
+                typingIndicatorElement.classList.add('hidden');
+            }
+        });
+        
+        // =========================================================================
         // MESSAGE ACTION HANDLERS (EDIT/DELETE/SHARE)
         // =========================================================================
 
@@ -430,7 +541,6 @@
             navigator.clipboard.writeText(shareUrl)
                 .then(() => displayError("Share link copied to clipboard!"))
                 .catch(() => {
-                    // Fallback for clipboard if it fails (like in some iframes)
                     const tempInput = document.createElement('input');
                     tempInput.value = shareUrl;
                     document.body.appendChild(tempInput);
@@ -440,6 +550,29 @@
                     displayError("Share link copied to clipboard! (Fallback)");
                 });
         };
+        
+        // Edit button handlers
+        saveEditButton.addEventListener('click', () => {
+            const newText = editInput.value.trim();
+            if (editingMessageKey && newText) {
+                const messageDocRef = ref(db, `messages/${editingMessageKey}`);
+                update(messageDocRef, {
+                    text: newText,
+                    edited: true,
+                    timestamp: serverTimestamp() 
+                })
+                .then(() => {
+                    editingMessageKey = null;
+                    editModal.classList.add('hidden');
+                })
+                .catch(error => displayError("Error updating message. Check rules."));
+            }
+        });
+
+        cancelEditButton.addEventListener('click', () => {
+            editingMessageKey = null;
+            editModal.classList.add('hidden');
+        });
 
 
         // Attach global listener for actions
@@ -453,7 +586,6 @@
             if (action === 'edit') {
                 const textElement = target.closest('.message-bubble').querySelector('.message-text');
                 if (textElement) {
-                    // Open edit modal (logic is unchanged from previous step)
                     editingMessageKey = key;
                     document.getElementById('edit-input').value = textElement.textContent.trim();
                     document.getElementById('edit-modal').classList.remove('hidden');
@@ -494,7 +626,7 @@
                  `;
             }
 
-            // Share link
+            // Share link SVG and span
             const shareLinkHtml = `
                 <span data-action="share" data-key="${key}" class="message-share-link text-xs ml-2 opacity-0 group-hover:opacity-100 transition duration-300 cursor-pointer ${isSelf ? 'text-indigo-200 hover:text-white' : 'text-gray-400 hover:text-gray-600'}" title="Copy Share Link">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline-block">
@@ -504,29 +636,34 @@
             `;
 
             return `
-                <div class="max-w-xs sm:max-w-md message-bubble group flex flex-col ${isSelf ? 'items-end' : 'items-start'}">
-                    <div class="relative ${isSelf ? 'bg-indigo-500 text-white' : 'bg-white border border-gray-200 text-gray-800'} p-3 rounded-xl shadow-md ${isSelf ? 'rounded-br-none' : 'rounded-bl-none'} transition duration-150 ease-in-out">
-                        ${!isSelf ? 
-                            `<p class="text-xs font-bold mb-1" style="color: ${color};">${message.displayName}</p>` 
-                            : ''
-                        }
-                        <p class="message-text text-sm break-words">${message.text}</p>
-                        <span 
-                            class="text-xs mt-1 block text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}"
-                            title="${formatTimestamp(message.timestamp, true)}"
-                        >
-                            ${formatTimestamp(message.timestamp)}
-                            ${message.edited ? '<span class="italic ml-1"> (edited)</span>' : ''}
-                            ${shareLinkHtml}
-                        </span>
-                        ${adminDeleteHtml}
+                <div class="flex ${isSelf ? 'justify-end' : 'justify-start'}">
+                    <div class="max-w-xs sm:max-w-md message-bubble group flex flex-col ${isSelf ? 'items-end' : 'items-start'}">
+                        <div class="relative ${isSelf ? 'bg-indigo-500 text-white' : 'bg-white border border-gray-200 text-gray-800'} p-3 rounded-xl shadow-md ${isSelf ? 'rounded-br-none' : 'rounded-bl-none'} transition duration-150 ease-in-out">
+                            ${!isSelf ? 
+                                `<p class="text-xs font-bold mb-1" style="color: ${color};">${message.displayName}</p>` 
+                                : ''
+                            }
+                            <p class="message-text text-sm break-words">${message.text}</p>
+                            <span 
+                                class="text-xs mt-1 block text-right ${isSelf ? 'text-indigo-200' : 'text-gray-400'}"
+                                title="${formatTimestamp(message.timestamp, true)}"
+                            >
+                                ${formatTimestamp(message.timestamp)}
+                                ${message.edited ? '<span class="italic ml-1"> (edited)</span>' : ''}
+                                ${shareLinkHtml}
+                            </span>
+                            ${adminDeleteHtml}
+                        </div>
+                        ${userActionsHtml}
                     </div>
-                    ${userActionsHtml}
                 </div>
             `;
         };
 
         const setupMessageListener = () => {
+            // Check if the user is authenticated before attempting to set up listeners
+            if (!currentUserId) return;
+            
             const recentMessagesQuery = query(messagesRef, limitToLast(50));
             
             onValue(recentMessagesQuery, (snapshot) => {
@@ -552,12 +689,16 @@
             sharedMessageContent.innerHTML = `<div class="text-center text-gray-500">Loading message...</div>`;
             
             try {
-                // Fetch the specific message
                 const snapshot = await get(child(messagesRef, messageId));
 
                 if (snapshot.exists()) {
                     const message = snapshot.val();
-                    // Render the single message
+                    // Render the single message. Since we don't have auth data in this mode, use a placeholder UID
+                    const tempUserId = 'share-viewer-id'; 
+                    currentUserId = tempUserId; 
+                    currentDisplayName = 'Share Viewer';
+                    isAdmin = false;
+                    
                     sharedMessageContent.innerHTML = renderMessage(snapshot.key, message);
                 } else {
                     sharedMessageContent.innerHTML = `<div class="text-center text-red-500 font-semibold">Message ID: ${messageId} not found.</div>`;
@@ -573,6 +714,81 @@
         // Button to close share view and reload main app
         closeShareViewButton.addEventListener('click', () => {
             window.location.search = ''; // Clear URL parameters and reload to main chat view
+        });
+
+        // =========================================================================
+        // AUTHENTICATION HANDLERS
+        // =========================================================================
+
+        const authForm = document.getElementById('auth-form');
+        const authEmail = document.getElementById('auth-email');
+        const authPassword = document.getElementById('auth-password');
+        const authDisplayName = document.getElementById('auth-display-name');
+        const authErrorMessage = document.getElementById('auth-error-message');
+        const displayNameGroup = document.getElementById('display-name-group');
+        const toggleAuthMode = document.getElementById('toggle-auth-mode');
+        let isSignUpMode = false;
+
+        document.getElementById('sign-out-button').addEventListener('click', () => {
+            signOut(auth).then(() => {
+                displayError("Signed out successfully.");
+            }).catch(error => {
+                displayError(`Sign out error: ${error.message}`);
+            });
+        });
+
+        toggleAuthMode.addEventListener('click', () => {
+            isSignUpMode = !isSignUpMode;
+            if (isSignUpMode) {
+                toggleAuthMode.textContent = "Already have an account? Switch to Sign In";
+                document.getElementById('submit-auth-button').textContent = "Sign Up";
+                displayNameGroup.classList.remove('hidden');
+            } else {
+                toggleAuthMode.textContent = "Need an account? Switch to Sign Up";
+                document.getElementById('submit-auth-button').textContent = "Sign In";
+                displayNameGroup.classList.add('hidden');
+            }
+            authErrorMessage.classList.add('hidden');
+        });
+
+        authForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            authErrorMessage.classList.add('hidden');
+
+            const email = authEmail.value;
+            const password = authPassword.value;
+            const displayName = authDisplayName.value || email.split('@')[0];
+
+            let authPromise;
+
+            if (isSignUpMode) {
+                authPromise = createUserWithEmailAndPassword(auth, email, password)
+                    .then(userCredential => {
+                        // Immediately update the profile with the display name
+                        return updateProfile(userCredential.user, { displayName: displayName });
+                    });
+            } else {
+                authPromise = signInWithEmailAndPassword(auth, email, password);
+            }
+
+            authPromise
+                .then(() => {
+                    // Handled by onAuthStateChanged
+                })
+                .catch(error => {
+                    let message = "An unknown error occurred.";
+                    if (error.code === 'auth/email-already-in-use') {
+                        message = "Email already in use. Try signing in.";
+                    } else if (error.code === 'auth/invalid-email') {
+                        message = "Invalid email format.";
+                    } else if (error.code === 'auth/weak-password') {
+                        message = "Password should be at least 6 characters.";
+                    } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                        message = "Invalid email or password.";
+                    }
+                    authErrorMessage.textContent = message;
+                    authErrorMessage.classList.remove('hidden');
+                });
         });
 
         // =========================================================================
@@ -602,7 +818,6 @@
                     
                     authModal.classList.add('hidden');
                     shareView.classList.add('hidden');
-                    // Visibility of chatWrapper is handled by handleChatControlUpdate
                     
                     messagesContainer.innerHTML = '';
                     setupMessageListener();
